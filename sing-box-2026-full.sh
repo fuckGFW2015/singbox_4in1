@@ -29,38 +29,38 @@ log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# === 自动获取 sing-box 最新稳定版本（增强版）===
+# === 自动获取 sing-box 最新稳定版本（增强版 + 日志安全）===
 get_latest_singbox_version() {
-  log "正在从 GitHub 获取 sing-box 最新版本..."
+  echo -e "\033[32m[INFO]\033[0m 正在从 GitHub 获取 sing-box 最新版本..." >&2
   local latest_tag=""
   local attempt=1
   local max_attempts=3
 
   while [ $attempt -le $max_attempts ]; do
-    # 使用临时文件避免管道中断问题
     local api_response
     api_response=$(curl -sL --max-time 10 \
       -H "Accept: application/vnd.github.v3+json" \
       -A "Mozilla/5.0 (sing-box-installer/2026)" \
       https://api.github.com/repos/SagerNet/sing-box/releases/latest)
 
-    # 检查响应是否包含有效 tag_name
     if [[ "$api_response" == *"\"tag_name\":"* ]] && \
        latest_tag=$(echo "$api_response" | grep -o '"tag_name":"[^"]*"' | head -1 | cut -d'"' -f4); then
 
       if [[ -n "$latest_tag" && "$latest_tag" == v* ]]; then
-        echo "${latest_tag#v}"
+        echo "${latest_tag#v}"  # ← 唯一允许的 stdout 输出！
         return 0
       fi
     fi
 
-    warn "第 $attempt 次尝试失败，3 秒后重试..."
+    echo -e "\033[33m[WARN]\033[0m 第 $attempt 次尝试失败，3 秒后重试..." >&2
     attempt=$((attempt + 1))
     sleep 3
   done
 
-  error "无法获取最新版本，请检查网络或手动指定 SBX_VERSION"
+  echo -e "\033[31m[ERROR]\033[0m 无法获取最新版本，请检查网络或手动指定 SBX_VERSION" >&2
+  exit 1
 }
+
 # === 系统检测 ===
 detect_os() {
   if [ -f /etc/os-release ]; then . /etc/os-release; OS=$ID; else OS=unknown; fi
