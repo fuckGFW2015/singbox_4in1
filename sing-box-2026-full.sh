@@ -11,7 +11,6 @@ domain=""
 enable_argo=false
 OS=""
 
-SBX_VERSION="1.10.1"
 ARCH=$(uname -m)
 case $ARCH in
   x86_64)   ARCH="amd64" ;;
@@ -30,11 +29,34 @@ log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
+# === 自动获取 sing-box 最新版本 ===
+get_latest_singbox_version() {
+  log "正在从 GitHub 获取 sing-box 最新版本..."
+  local latest_tag=""
+  for i in {1..3}; do
+    if latest_tag=$(curl -sL --max-time 10 \
+      -H "Accept: application/vnd.github.v3+json" \
+      -A "Mozilla/5.0 (sing-box-installer/2026)" \
+      https://api.github.com/repos/SagerNet/sing-box/releases/latest | \
+      grep '"tag_name":' | head -1 | cut -d'"' -f4); then
+
+      if [[ -n "$latest_tag" && "$latest_tag" == v* ]]; then
+        echo "${latest_tag#v}"  # 输出去掉 'v' 的版本号，如 1.10.0
+        return 0
+      fi
+    fi
+    warn "第 $i 次尝试失败，3 秒后重试..."
+    sleep 3
+  done
+  error "无法获取最新版本，请检查网络或手动指定 SBX_VERSION"
+}
+
 # === 系统检测 ===
 detect_os() {
   if [ -f /etc/os-release ]; then . /etc/os-release; OS=$ID; else OS=unknown; fi
 }
 
+# === 安装命令生成 ===
 get_install_cmd() {
   case "$OS" in
     debian|ubuntu) echo "sudo apt update && sudo apt install -y curl openssl tar base64 socat ca-certificates qrencode iptables cron";;
@@ -67,6 +89,20 @@ install_singbox() {
   rm -rf /tmp/sbx*
   log "sing-box 安装完成。"
 }
+
+# ===================================================================
+# ⚠️ 注意：以下才是脚本的执行起点（应放在所有函数定义之后！）
+# 你完整的脚本应在后面添加如下逻辑（示例）：
+#
+# detect_os
+# log "检测到系统: $OS"
+# SBX_VERSION=$(get_latest_singbox_version)
+# log "将安装 sing-box v${SBX_VERSION}"
+# check_deps
+# install_singbox
+# ... 后续交互和部署逻辑 ...
+#
+# ===================================================================
 
 # === 安装 cloudflared ===
 install_cloudflared() {
