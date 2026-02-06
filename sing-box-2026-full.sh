@@ -11,18 +11,53 @@ warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
 # 1. 环境清理与基础依赖
+# 1. 环境清理、依赖安装及防火墙全开
 prepare_env() {
-    log "正在清理冲突环境并安装依赖..."
-    fuser -k 443/tcp 443/udp 8443/udp 2>/dev/null || true
-    systemctl stop nginx apache2 cloudflared 2>/dev/null || true
+    log "正在清理冲突环境、安装依赖并放行系统防火墙..."
+    
+    # 基础依赖安装
     apt update -q && apt install -y curl wget openssl tar coreutils ca-certificates socat qrencode iptables unzip iptables-persistent net-tools dnsutils -y
 
-    # 开启 BBR
+    # --- 防火墙放行逻辑开始 ---
+    # 1. 如果有 ufw，直接禁用（最省事）
+    if command -v ufw >/dev/null; then
+        ufw disable >/dev/null 2>&1 || true
+    fi
+
+    # 2. 清空 iptables 所有链规则
+    iptables -P INPUT ACCEPT
+    iptables -P FORWARD ACCEPT
+    iptables -P OUTPUT ACCEPT
+    iptables -F
+    iptables -X
+    iptables -t nat -F
+    iptables -t nat -X
+    iptables -t mangle -F
+    iptables -t mangle -X
+
+    # 3. 针对性放行我们要用的端口 (以防万一)
+    iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+    iptables -A INPUT -p udp --dport 443 -j ACCEPT
+    iptables -A INPUT -p udp --dport 8443 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 9090 -j ACCEPT
+    
+    # 4. 永久保存规则（防止重启失效）
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4
+    # 如果是 IPv6
+    if command -v ip6tables >/dev/null; then
+        ip6tables -P INPUT ACCEPT
+        ip6tables -F
+        ip6tables-save > /etc/iptables/rules.v6
+    fi
+    # --- 防火墙放行逻辑结束 ---
+
+    # 开启 BBR 加速
     if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
         echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
         echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
         sysctl -p >/dev/null
-        log "BBR 已启用"
+        log "BBR 加速已启用"
     fi
 }
 
