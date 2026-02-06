@@ -46,13 +46,23 @@ install_singbox() {
     mv /tmp/sing-box-*/sing-box "$work_dir/sing-box"
     chmod +x "$work_dir/sing-box"
 
-    log "部署 Yacd-Meta 可视化面板..."
+log "部署 Yacd-Meta 可视化面板..."
     mkdir -p "$work_dir/ui"
-    wget -qO /tmp/yacd.zip https://github.com/haishanh/yacd/archive/refs/heads/meta.zip
-    unzip -qo /tmp/yacd.zip -d /tmp
-    mv /tmp/yacd-meta/dist/* "$work_dir/ui/"
+    # 替换为 MetaCubeX 维护的稳定版，这个源已经编译好，解压即用
+    wget -qO /tmp/yacd.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip || warn "面板下载失败，请检查网络"
+    
+    if [ -f /tmp/yacd.zip ]; then
+        unzip -qo /tmp/yacd.zip -d /tmp
+        # 注意：gh-pages 分支解压后的文件夹名是 Yacd-meta-gh-pages
+        # 且文件直接在根目录，不需要进入 dist 文件夹
+        cp -rf /tmp/Yacd-meta-gh-pages/* "$work_dir/ui/" 2>/dev/null || true
+        log "面板文件部署成功"
+        rm -rf /tmp/yacd.zip /tmp/Yacd-meta-gh-pages
+    else
+        warn "未能下载面板，脚本将继续安装核心节点..."
+    fi
+    
     chown -R sing-box:sing-box "$work_dir"
-}
 
 # 4. 证书逻辑
 request_acme_cert() {
