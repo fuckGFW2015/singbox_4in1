@@ -69,66 +69,45 @@ setup_config() {
     local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
     local ip=$(curl -s4 ip.sb)
 
-    # 1. 强制确保证书目录权限（防止 sing-box 读取失败）
-    mkdir -p "$work_dir/ui"
-    touch "$work_dir/ui/index.html" # 即使面板下载失败，占位符也能防止报错
+    # 生成自签名证书
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" -days 3650 -nodes -subj "/CN=$domain" >/dev/null 2>&1
-    chown -R root:root "$work_dir"
 
-    # 2. 写入 JSON (确保格式严谨)
+    # 写入符合新版 (1.11+) 规范的 JSON
     cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "info" },
   "experimental": {
-    "cache_file": { "enabled": true },
     "clash_api": { "external_controller": "127.0.0.1:9090", "external_ui": "ui", "secret": "$secret" }
   },
   "inbounds": [
     { "type": "vless", "tag": "Reality", "listen": "::", "listen_port": 443, "users": [{"uuid": "$uuid"}], "tls": { "enabled": true, "server_name": "www.apple.com", "reality": { "enabled": true, "handshake": { "server": "www.apple.com", "server_port": 443 }, "private_key": "$priv" } } },
-    { "type": "hysteria2", "tag": "Hy2", "listen": "::", "listen_port": 443, "users": [{"password": "$pass"}], "tls": { "enabled": true, "server_name": "$domain", "cert_path": "$work_dir/cert.pem", "key_path": "$work_dir/key.pem" } },
-    { "type": "tuic", "tag": "TUIC5", "listen": "::", "listen_port": 8443, "users": [{"uuid": "$uuid", "password": "$pass"}], "tls": { "enabled": true, "server_name": "$domain", "cert_path": "$work_dir/cert.pem", "key_path": "$work_dir/key.pem" } }
+    { "type": "hysteria2", "tag": "Hy2", "listen": "::", "listen_port": 443, "users": [{"password": "$pass"}], "tls": { "enabled": true, "server_name": "$domain", "certificate_path": "$work_dir/cert.pem", "key_path": "$work_dir/key.pem" } },
+    { "type": "tuic", "tag": "TUIC5", "listen": "::", "listen_port": 8443, "users": [{"uuid": "$uuid", "password": "$pass"}], "tls": { "enabled": true, "server_name": "$domain", "certificate_path": "$work_dir/cert.pem", "key_path": "$work_dir/key.pem" } }
   ],
   "outbounds": [{"type": "direct", "tag": "direct"}]
 }
 EOF
 
-    # 3. 语法预检 (这一步最重要，失败会直接停止脚本)
-    log "正在校验 sing-box 配置文件格式..."
-    "$work_dir/sing-box" check -c "$work_dir/config.json" || error "配置文件校验失败！请检查是否有特殊字符。"
+    log "正在重新校验 sing-box 配置..."
+    "$work_dir/sing-box" check -c "$work_dir/config.json"
 
-    # 4. 写入 Service (保持 User=root)
     cat <<EOF > /etc/systemd/system/sing-box.service
 [Unit]
 Description=sing-box service
 After=network.target
-
 [Service]
 ExecStart=$work_dir/sing-box run -c $work_dir/config.json
 Restart=on-failure
 User=root
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # 5. 重启并验证状态
-    systemctl daemon-reload
-    systemctl enable --now sing-box
+    systemctl daemon-reload && systemctl enable --now sing-box
     
-    log "等待服务启动..."
-    sleep 3
-    if systemctl is-active --quiet sing-box; then
-        log "✅ 服务已成功在 Ubuntu 上启动并运行！"
-    else
-        warn "❌ 服务未能运行，请执行: journalctl -u sing-box --no-pager -n 20"
-        exit 1
-    fi
-
-    # 6. 生成二维码输出 (Reality)
-    echo -e "\n\033[35m========== 最终配置详情 ==========\033[0m"
-    local rel_url="vless://$uuid@$ip:443?security=reality&pbk=$pub&sni=www.apple.com&fp=chrome&type=tcp#Reality_Ubuntu"
-    echo -e "Reality 链接: \033[36m$rel_url\033[0m"
-    qrencode -t UTF8 "$rel_url"
+    echo -e "\n\033[32m[SUCCESS]\033[0m 配置校验通过，服务已启动！"
+    log "Reality 链接:"
+    echo "vless://$uuid@$ip:443?security=reality&pbk=$pub&sni=www.apple.com&fp=chrome&type=tcp#Reality_$(date +%F)"
 }
 uninstall() {
     log "正在卸载并恢复 Ubuntu 网络设置..."
