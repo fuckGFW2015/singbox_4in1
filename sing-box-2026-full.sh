@@ -109,7 +109,7 @@ setup_config() {
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" -days 3650 -nodes -subj "/CN=$domain" >/dev/null 2>&1
     chmod 600 "$work_dir/cert.pem" "$work_dir/key.pem"
 
-    # 構造 JSON (修正 cert_path 為 certificate_path)
+    # 構造 JSON
     cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "info" },
@@ -202,6 +202,7 @@ EOF
     fi
 
     # 服務寫入
+    systemctl stop sing-box >/dev/null 2>&1 || true
     cat <<EOF > /etc/systemd/system/sing-box.service
 [Unit]
 Description=sing-box service
@@ -225,13 +226,19 @@ EOF
     echo -e "\033[35m==============================================================\033[0m"
 
     echo -e "\n\033[33m🚀 [Reality 節點]\033[0m"
-    local rel_url="vless://$uuid@$ip:443?security=reality&pbk=$pub&sni=www.apple.com&fp=chrome&sid=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
-    echo -e "$rel_url" | qrencode -t UTF8
+    # 修正 sid 參數為 shortId 參數，並確保 flow 為空或 xtls-rprx-vision
+    local rel_url="vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.apple.com&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
     echo -e "\033[32m$rel_url\033[0m"
+    echo -e "$rel_url" | qrencode -t UTF8
 
     echo -e "\n\033[33m🚀 [Hysteria2 節點]\033[0m"
     local hy2_url="hysteria2://$pass@$ip:443?sni=$domain&insecure=1#Hy2"
     echo -e "\033[32m$hy2_url\033[0m"
+
+    echo -e "\n\033[33m🚀 [TUIC v5 節點]\033[0m"
+    # 補全 TUIC 連結生成
+    local tuic_url="tuic://$uuid:$pass@$ip:8443?sni=$domain&alpn=h3&congestion_control=bbr&udp_relay_mode=native&insecure=1#TUIC5"
+    echo -e "\033[32m$tuic_url\033[0m"
 
     if [[ ! -z "$argo_domain" ]]; then
         echo -e "\n\033[33m🚀 [Argo VMess]\033[0m"
@@ -240,16 +247,3 @@ EOF
     fi
     echo -e "\n\033[35m==============================================================\033[0m\n"
 }
-
-# --- 執行程序 ---
-case "$1" in
-    uninstall)
-        uninstall
-        ;;
-    *)
-        uninstall
-        prepare_env
-        install_singbox_and_ui
-        setup_config
-        ;;
-esac
