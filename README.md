@@ -1,4 +1,4 @@
-### 这个版本补全了你要求的所有功能：
+### 这个版本所有功能：
 
 5合1：Reality + Hy2 + TUIC5 + Shadowsocks + Argo。
 
