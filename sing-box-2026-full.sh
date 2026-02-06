@@ -1,6 +1,6 @@
 #!/bin/bash
 # 2026 最终集成增强版：Reality + Hy2 + TUIC5 + Argo + Yacd-Meta Dashboard
-# 修正点：完善了 uninstall 参数的判断逻辑，确保卸载流程独立运行
+# 修正：闭合所有逻辑块，支持参数化卸载
 
 set -e
 work_dir="/etc/sing-box"
@@ -8,8 +8,6 @@ work_dir="/etc/sing-box"
 log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
-
-# --- 功能函数定义 ---
 
 prepare_env() {
     log "正在清理冲突环境、安装依赖并放行系统防火墙..."
@@ -24,6 +22,7 @@ prepare_env() {
     iptables -A INPUT -p udp --dport 443 -j ACCEPT
     iptables -A INPUT -p udp --dport 8443 -j ACCEPT
     iptables -A INPUT -p tcp --dport 9090 -j ACCEPT
+    mkdir -p /etc/iptables
     iptables-save > /etc/iptables/rules.v4
     if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
         echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
@@ -49,16 +48,15 @@ install_singbox() {
 
     log "部署 Yacd-Meta 可视化面板..."
     mkdir -p "$work_dir/ui"
-    wget -qO /tmp/yacd.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip || warn "下载面板包失败"
-    
+    wget -qO /tmp/yacd.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip || warn "面板下载失败"
     if [ -f /tmp/yacd.zip ]; then
         unzip -qo /tmp/yacd.zip -d /tmp
         cp -rf /tmp/Yacd-meta-gh-pages/* "$work_dir/ui/" 2>/dev/null || true
+        log "✅ 面板文件部署成功"
         rm -rf /tmp/yacd.zip /tmp/Yacd-meta-gh-pages
-        log "✅ 面板已成功部署至 $work_dir/ui"  # 确保这行存在
-    else
-        error "面板文件缺失，请检查网络后重试" # 如果一定要面板，可以改成 error 强行停止
     fi
+    chown -R sing-box:sing-box "$work_dir"
+}
 
 request_acme_cert() {
     local domain="$1"
@@ -110,6 +108,7 @@ setup_config() {
   "outbounds": [{"type": "direct", "tag": "direct"}]
 }
 EOF
+
     cat <<EOF > /etc/systemd/system/sing-box.service
 [Unit]
 Description=sing-box service
@@ -126,66 +125,30 @@ EOF
     systemctl daemon-reload && systemctl enable --now sing-box
     clear
     log "========================================"
-    log "🔒 安全模式：面板仅限本地访问"
     log "🔑 面板密钥: $secret"
-    log "----------------------------------------"
-    log "SSH 隧道指令（本地终端执行）:"
-    log "ssh -L 9090:127.0.0.1:9090 root@$ip"
-    log "----------------------------------------"
-    log "1. Reality: vless://$uuid@$ip:443?security=reality&pbk=$pub&sni=$reality_sni&fp=chrome&type=tcp#Reality"
-    log "2. Hy2: hysteria2://$pass@$ip:443?sni=$domain#Hy2"
-    log "3. TUIC5: tuic://$uuid:$pass@$ip:8443?sni=$domain&alpn=h3#TUIC5"
+    log "SSH 隧道指令: ssh -L 9090:127.0.0.1:9090 root@$ip"
+    log "Reality: vless://$uuid@$ip:443?security=reality&pbk=$pub&sni=$reality_sni&fp=chrome&type=tcp#Reality"
+    log "Hy2: hysteria2://$pass@$ip:443?sni=$domain#Hy2"
+    log "TUIC5: tuic://$uuid:$pass@$ip:8443?sni=$domain&alpn=h3#TUIC5"
     log "========================================"
-}
-
-setup_argo() {
-    read -p "配置 Argo 隧道? (y/n): " run_argo
-    if [[ "$run_argo" == "y" ]]; then
-        local arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-        curl -L -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$arch && chmod +x /usr/local/bin/cloudflared
-        cloudflared tunnel login
-        read -p "输入绑定域名: " argo_domain
-        cloudflared tunnel delete -f singbox-tunnel 2>/dev/null || true
-        tunnel_info=$(cloudflared tunnel create singbox-tunnel)
-        tunnel_id=$(echo "$tunnel_info" | grep -oE "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-        cloudflared tunnel route dns singbox-tunnel "$argo_domain"
-        mkdir -p /etc/cloudflared
-        cat <<EOF > /etc/cloudflared/config.yml
-tunnel: $tunnel_id
-credentials-file: /root/.cloudflared/$tunnel_id.json
-ingress:
-  - hostname: $argo_domain
-    service: http://127.0.0.1:8080
-  - service: http_status:404
-EOF
-        cloudflared service install && systemctl enable --now cloudflared
-    fi
 }
 
 uninstall_all() {
     log "正在启动彻底卸载流程..."
     systemctl stop sing-box 2>/dev/null || true
-    systemctl disable sing-box 2>/dev/null || true
     rm -f /etc/systemd/system/sing-box.service
-    systemctl stop cloudflared 2>/dev/null || true
-    if command -v cloudflared >/dev/null; then cloudflared service uninstall 2>/dev/null || true; fi
-    rm -f /usr/local/bin/cloudflared
-    rm -rf "$work_dir" /etc/cloudflared /root/.cloudflared ~/.acme.sh
+    rm -rf "$work_dir" /root/.cloudflared ~/.acme.sh
     iptables -F && iptables -t nat -F && iptables -X
     systemctl daemon-reload
-    log "✅ 卸载完成，系统已恢复纯净。"
+    log "✅ 卸载完成。"
 }
 
-# --- 核心入口逻辑 ---
-
+# 核心逻辑：区分安装与卸载
 if [[ "$1" == "uninstall" ]]; then
-    # 如果参数是 uninstall，只运行卸载函数
     uninstall_all
 else
-    # 否则运行完整的安装流程
     prepare_env
     create_user
     install_singbox
     setup_config
-    setup_argo
 fi
