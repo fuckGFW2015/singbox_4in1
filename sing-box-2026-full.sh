@@ -161,7 +161,6 @@ EOF
 # --- 5. 核心執行入口 ---
 # 這是你之前腳本可能缺失的部分，確保函數按順序執行
 main() {
-    uninstall
     prepare_env
     install_singbox_and_ui
     setup_config
