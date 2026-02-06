@@ -159,11 +159,20 @@ EOF
 }
 
 # --- 5. 核心執行入口 ---
-# 這是你之前腳本可能缺失的部分，確保函數按順序執行
 main() {
     prepare_env
     install_singbox_and_ui
     setup_config
 }
 
-main "$@"
+# --- 6. 命令行入口控制 ---
+case "${1:-}" in
+    uninstall)
+        uninstall
+        log "sing-box 已成功卸载。"
+        exit 0
+        ;;
+    *)
+        main "$@"
+        ;;
+esac
