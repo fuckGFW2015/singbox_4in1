@@ -9,13 +9,12 @@ log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# --- 1. 彻底卸载函数（精确匹配进程名，避免 Killed）---
+# --- 1. 彻底卸载函数（精确匹配进程名）---
 uninstall() {
     log "正在清理舊環境..."
     systemctl stop sing-box >/dev/null 2>&1 || true
     systemctl disable sing-box >/dev/null 2>&1 || true
 
-    # 使用 -x 精确匹配进程名，避免误杀脚本自身
     pgrep -x "sing-box" >/dev/null && pkill -9 -x "sing-box" || true
     pgrep -x "cloudflared" >/dev/null && pkill -9 -x "cloudflared" || true
 
@@ -26,7 +25,7 @@ uninstall() {
 
 # --- 2. 环境准备 ---
 prepare_env() {
-    log "配置 Ubuntu 24.04 組件..."
+    log "配置系统組件..."
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y && apt-get install -y curl wget openssl tar qrencode unzip net-tools iptables-persistent
 
@@ -35,9 +34,9 @@ prepare_env() {
         sysctl -p >/dev/null 2>&1 || true
     fi
 
-    # 保留 443 共用：TCP for Reality, UDP for Hy2（实测可用）
+    # 防火墙：保留 443 共用（TCP for Reality, UDP for Hy2）
     iptables -F
-    iptables -A INPUT -p tcp --dport 22 -j ACCEPT   # SSH
+    iptables -A INPUT -p tcp --dport 22 -j ACCEPT
     iptables -A INPUT -p tcp --dport 443 -j ACCEPT  # Reality (TCP)
     iptables -A INPUT -p udp --dport 443 -j ACCEPT  # Hysteria2 (UDP)
     iptables -A INPUT -p udp --dport 8443 -j ACCEPT # TUIC
@@ -66,10 +65,20 @@ install_singbox_and_ui() {
     rm -rf /tmp/ui.zip /tmp/ui_temp /tmp/sb.tar.gz
 }
 
-# --- 4. 核心配置（保留你的通配配置）---
+# --- 4. 核心配置（支持无域名 → 自动用 IP）---
 setup_config() {
-    read -p "請輸入解析域名 (用于 Hy2/TUIC，默認為 apple.com): " domain
-    [[ -z "$domain" ]] && domain="apple.com"
+    local ip=$(curl -s4 ip.sb)
+    if [[ -z "$ip" ]]; then
+        error "无法获取公网 IP，请检查网络连接"
+    fi
+
+    read -p "請輸入解析域名（若無，直接按回車將使用 IP: $ip）: " domain
+    if [[ -z "$domain" ]]; then
+        domain="$ip"
+        log "未提供域名，將使用伺服器 IP 作為 SNI: $ip"
+    else
+        log "使用域名: $domain"
+    fi
 
     local uuid=$(cat /proc/sys/kernel/random/uuid)
     local pass=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 12)
@@ -78,8 +87,8 @@ setup_config() {
     local priv=$(echo "$keypair" | awk '/PrivateKey:/ {print $2}')
     local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
     local short_id=$(openssl rand -hex 4)
-    local ip=$(curl -s4 ip.sb)
 
+    # 为 Hy2/TUIC 生成证书（CN = 用户输入的 domain，可能是 IP 或域名）
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$domain" >/dev/null 2>&1
 
@@ -173,10 +182,10 @@ EOF
     echo -e "\033[35m==============================================================\033[0m\n"
 }
 
-# --- 5. 交互菜单（重装不确认）---
+# --- 5. 交互菜单 ---
 show_menu() {
     clear
-    echo -e "\033[36m      sing-box 管理脚本 (Reality 修复版)\033[0m"
+    echo -e "\033[36m      sing-box 管理脚本 (Reality 修复版 - 支持无域名)\033[0m"
     echo "------------------------------------------"
     echo "  1. 安装 / 重新安装"
     echo "  2. 彻底卸载"
@@ -184,7 +193,14 @@ show_menu() {
     echo "------------------------------------------"
     read -p "选择操作: " num
     case "$num" in
-        1) uninstall; prepare_env; install_singbox_and_ui; setup_config ;;
+        1)
+            uninstall
+            prepare_env
+            install_singbox_and_ui
+            setup_config
+            # 安装成功后删除自身
+            [[ -f "$0" ]] && rm -f "$0" && log "🧹 安装脚本已自动清理。"
+            ;;
         2) uninstall ;;
         3) exit 0 ;;
         *) error "无效选择" ;;
