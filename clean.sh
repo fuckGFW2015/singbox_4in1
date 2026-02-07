@@ -1,4 +1,3 @@
-cat <<EOF > /root/clean.sh
 #!/bin/bash
 
 log() { echo -e "\033[32m[INFO]\033[0m \$1"; }
@@ -39,4 +38,4 @@ usage=\$(df / | grep / | awk '{ print \$5 }' | sed 's/%//g')
 if [ "\$usage" -gt 85 ]; then
     echo -e "\n\033[31m[警告] 磁盤佔用仍高於 85%，請手動檢查大文件 (ncdu /)！\033[0m"
 fi
-EOF
+
