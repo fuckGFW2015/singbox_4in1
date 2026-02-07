@@ -78,7 +78,7 @@ install_singbox_and_ui() {
 
 setup_config() {
     reality_sni="www.cloudflare.com"
-    hy2_tuic_sni="www.microsoft.com"
+    hy2_tuic_sni="one.one.one.one"
     log "Reality 使用 SNI: $reality_sni"
     log "HY2/TUIC 使用 SNI: $hy2_tuic_sni"
 
@@ -127,7 +127,7 @@ setup_config() {
       "tls": {
         "enabled": true,
         "server_name": "$reality_sni",
-        "alpn": ["h2", "http/1.1"],
+        "alpn": ["http/1.1"],  // Reality 主要用于 TCP 代理，h2 非必需
         "reality": {
           "enabled": true,
           "handshake": {
@@ -189,7 +189,7 @@ EOF
     echo -e "\n\033[35m==============================================================\033[0m"
     log "🔑 面板地址: http://$ip:9090/ui/  密鑰: $secret"
     echo -e "\n\033[33m🚀 Reality 節點:\033[0m"
-    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=$reality_sni&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
+    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=$reality_sni&fp=chrome&sid=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
     echo -e "\n\033[33m🚀 Hy2 節點:\033[0m"
     echo "hysteria2://$pass@$ip:4443?sni=$hy2_tuic_sni&insecure=1#Hy2"
     echo -e "\n\033[33m🚀 TUIC5 節點:\033[0m"
