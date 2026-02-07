@@ -130,7 +130,6 @@ cat <<EOF > "$work_dir/config.json"
         "enabled": true,
         "server_name": "$reality_sni",
         "alpn": ["h2", "http/1.1"],
-        "fingerprint": "chrome",
         "reality": {
           "enabled": true,
           "handshake": {
