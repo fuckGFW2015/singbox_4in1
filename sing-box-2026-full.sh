@@ -77,8 +77,7 @@ install_singbox_and_ui() {
 }
 
 setup_config() {
-    # --- SNI 分离策略（使用更稳定的域名）---
-    reality_sni="www.cloudflare.com"      # ✅ 替换为高可用 SNI
+    reality_sni="www.cloudflare.com"
     hy2_tuic_sni="www.microsoft.com"
     log "Reality 使用 SNI: $reality_sni"
     log "HY2/TUIC 使用 SNI: $hy2_tuic_sni"
@@ -96,17 +95,16 @@ setup_config() {
         error "❌ 无法获取服务器公网 IPv4 地址，请检查网络连接"
     fi
 
-    # 仅为 HY2/TUIC 生成自签名证书（CN 必须匹配其 SNI）
+    # ✅ 先创建目录
+    rm -f "$work_dir/config.json" "$work_dir/cert.pem" "$work_dir/key.pem"
+    mkdir -p "$work_dir"
+
+    # ✅ 证书直接生成到目标目录
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$hy2_tuic_sni" >/dev/null 2>&1
 
-    # 彻底清理并重建配置目录
-    rm -rf "$work_dir"
-    mkdir -p "$work_dir"
-    mv "$work_dir/../cert.pem" "$work_dir/" 2>/dev/null || true
-    mv "$work_dir/../key.pem" "$work_dir/" 2>/dev/null || true
-
-cat <<EOF > "$work_dir/config.json"
+    # 接下来写 config.json（引用 $work_dir/cert.pem）
+    cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "info" },
   "experimental": {
