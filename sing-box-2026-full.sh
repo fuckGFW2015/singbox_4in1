@@ -7,7 +7,7 @@ bin_path="/usr/local/bin/sing-box"
 log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# --- 修复点：仅此处修改，避免 Killed ---
+# --- 卸载函数 ---
 uninstall() {
     log "正在清理舊環境..."
     systemctl stop sing-box >/dev/null 2>&1 || true
@@ -32,10 +32,10 @@ prepare_env() {
 
     iptables -F
     iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-    iptables -A INPUT -p tcp --dport 443 -j ACCEPT  # Reality (TCP)
-    iptables -A INPUT -p udp --dport 443 -j ACCEPT  # Hysteria2 (UDP)
-    iptables -A INPUT -p udp --dport 8443 -j ACCEPT # TUIC
-    iptables -A INPUT -p tcp --dport 9090 -j ACCEPT # Panel
+    iptables -A INPUT -p tcp --dport 443 -j ACCEPT   # Reality (TCP)
+    iptables -A INPUT -p udp --dport 4443 -j ACCEPT  # Hysteria2 (UDP)
+    iptables -A INPUT -p udp --dport 8443 -j ACCEPT  # TUIC (UDP)
+    iptables -A INPUT -p tcp --dport 9090 -j ACCEPT  # Panel
     iptables-save > /etc/iptables/rules.v4
 }
 
@@ -60,10 +60,11 @@ install_singbox_and_ui() {
 }
 
 setup_config() {
-    # 更推荐的默认域名（微软）
-    domain="www.microsoft.com"
-    log "使用默认域名: $domain（适用于 HY2/TUIC）"
-    # =============================================
+    # --- SNI 分离策略 ---
+    reality_sni="global.fujifilm.com"
+    hy2_tuic_sni="www.microsoft.com"
+    log "Reality 使用 SNI: $reality_sni"
+    log "HY2/TUIC 使用 SNI: $hy2_tuic_sni"
 
     local uuid=$(cat /proc/sys/kernel/random/uuid)
     local pass=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 12)
@@ -72,14 +73,15 @@ setup_config() {
     local priv=$(echo "$keypair" | awk '/PrivateKey:/ {print $2}')
     local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
     local short_id=$(openssl rand -hex 4)
-    # ✅ 修正后的 IP 获取逻辑
+
     local ip=$(curl -s4m5 ip.sb || curl -s4m5 api.ipify.org)
     if [[ -z "$ip" ]]; then
         error "❌ 无法获取服务器公网 IPv4 地址，请检查网络连接"
     fi
 
+    # 仅为 HY2/TUIC 生成自签名证书（CN 必须匹配其 SNI）
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
-        -days 3650 -nodes -subj "/CN=$domain" >/dev/null 2>&1
+        -days 3650 -nodes -subj "/CN=$hy2_tuic_sni" >/dev/null 2>&1
 
 cat <<EOF > "$work_dir/config.json"
 {
@@ -103,12 +105,13 @@ cat <<EOF > "$work_dir/config.json"
       "users": [{ "uuid": "$uuid", "flow": "xtls-rprx-vision" }],
       "tls": {
         "enabled": true,
-        "server_name": "www.microsoft.com",
+        "server_name": "$reality_sni",
         "alpn": ["h2", "http/1.1"],
+        "fingerprint": "chrome",
         "reality": {
           "enabled": true,
           "handshake": {
-            "server": "www.microsoft.com",
+            "server": "$reality_sni",
             "server_port": 443
           },
           "private_key": "$priv",
@@ -120,11 +123,11 @@ cat <<EOF > "$work_dir/config.json"
       "type": "hysteria2",
       "tag": "Hy2-In",
       "listen": "0.0.0.0",
-      "listen_port": 443,
+      "listen_port": 4443,
       "users": [{"password": "$pass"}],
       "tls": {
         "enabled": true,
-        "server_name": "$domain",
+        "server_name": "$hy2_tuic_sni",
         "certificate_path": "$work_dir/cert.pem",
         "key_path": "$work_dir/key.pem"
       }
@@ -137,7 +140,7 @@ cat <<EOF > "$work_dir/config.json"
       "users": [{"uuid": "$uuid", "password": "$pass"}],
       "tls": {
         "enabled": true,
-        "server_name": "$domain",
+        "server_name": "$hy2_tuic_sni",
         "certificate_path": "$work_dir/cert.pem",
         "key_path": "$work_dir/key.pem",
         "alpn": ["h3"]
@@ -160,23 +163,23 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-      systemctl daemon-reload && systemctl enable --now sing-box
+    systemctl daemon-reload && systemctl enable --now sing-box
 
     clear
     echo -e "\n\033[35m==============================================================\033[0m"
     log "🔑 面板地址: http://$ip:9090/ui/  密鑰: $secret"
     echo -e "\n\033[33m🚀 Reality 節點:\033[0m"
-    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.microsoft.com&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
+    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=$reality_sni&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
     echo -e "\n\033[33m🚀 Hy2 節點:\033[0m"
-    echo "hysteria2://$pass@$ip:443?sni=$domain&insecure=1#Hy2"
+    echo "hysteria2://$pass@$ip:4443?sni=$hy2_tuic_sni&insecure=1#Hy2"
     echo -e "\n\033[33m🚀 TUIC5 節點:\033[0m"
-    echo "tuic://$uuid:$pass@$ip:8443?sni=$domain&alpn=h3&insecure=1#TUIC5"
+    echo "tuic://$uuid:$pass@$ip:8443?sni=$hy2_tuic_sni&alpn=h3&insecure=1#TUIC5"
     echo -e "\033[35m==============================================================\033[0m\n"
 }
 
 show_menu() {
     clear
-    echo -e "\033[36m      sing-box 脚本 (还原原始通配版)\033[0m"
+    echo -e "\033[36m      sing-box 多协议共存版 (Reality + HY2 + TUIC)\033[0m"
     echo "------------------------------------------"
     echo "  1. 安装 / 重新安装"
     echo "  2. 彻底卸载"
