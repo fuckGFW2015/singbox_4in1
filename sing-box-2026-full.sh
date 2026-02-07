@@ -1,29 +1,25 @@
 #!/bin/bash
 set -e
 
-# --- 基础配置 ---
 work_dir="/etc/sing-box"
 bin_path="/usr/local/bin/sing-box"
 
 log() { echo -e "\033[32m[INFO]\033[0m $1"; }
-warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# --- 1. 彻底卸载函数（精确匹配进程名）---
+# --- 修复点：仅此处修改，避免 Killed ---
 uninstall() {
     log "正在清理舊環境..."
     systemctl stop sing-box >/dev/null 2>&1 || true
     systemctl disable sing-box >/dev/null 2>&1 || true
-
     pgrep -x "sing-box" >/dev/null && pkill -9 -x "sing-box" || true
     pgrep -x "cloudflared" >/dev/null && pkill -9 -x "cloudflared" || true
-
     rm -rf "$work_dir" /etc/systemd/system/sing-box.service "$bin_path"
     systemctl daemon-reload >/dev/null 2>&1 || true
     log "✅ 已成功卸载所有组件。"
 }
+# ----------------------------------------
 
-# --- 2. 环境准备 ---
 prepare_env() {
     log "配置系统組件..."
     export DEBIAN_FRONTEND=noninteractive
@@ -34,7 +30,6 @@ prepare_env() {
         sysctl -p >/dev/null 2>&1 || true
     fi
 
-    # 防火墙：保留 443 共用（TCP for Reality, UDP for Hy2）
     iptables -F
     iptables -A INPUT -p tcp --dport 22 -j ACCEPT
     iptables -A INPUT -p tcp --dport 443 -j ACCEPT  # Reality (TCP)
@@ -44,7 +39,6 @@ prepare_env() {
     iptables-save > /etc/iptables/rules.v4
 }
 
-# --- 3. 安装核心与 UI ---
 install_singbox_and_ui() {
     log "下載 sing-box 核心..."
     local arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
@@ -59,26 +53,17 @@ install_singbox_and_ui() {
     unzip -o /tmp/ui.zip -d /tmp/ui_temp
     local real_ui_path=$(find /tmp/ui_temp -name "index.html" | head -n 1 | xargs dirname)
     if [ ! -f "$real_ui_path/index.html" ]; then
-        error "面板文件缺失，请检查网络或 GitHub 状态"
+        error "面板文件缺失"
     fi
     cp -rf "$real_ui_path"/* "$work_dir/ui/"
     rm -rf /tmp/ui.zip /tmp/ui_temp /tmp/sb.tar.gz
 }
 
-# --- 4. 核心配置（支持无域名 → 自动用 IP）---
 setup_config() {
-    local ip=$(curl -s4 ip.sb)
-    if [[ -z "$ip" ]]; then
-        error "无法获取公网 IP，请检查网络连接"
-    fi
-
-    read -p "請輸入解析域名（若無，直接按回車將使用 IP: $ip）: " domain
-    if [[ -z "$domain" ]]; then
-        domain="$ip"
-        log "未提供域名，將使用伺服器 IP 作為 SNI: $ip"
-    else
-        log "使用域名: $domain"
-    fi
+    # === 关键：恢复默认 apple.com，不强制用户输入！===
+    domain="apple.com"
+    log "使用默认域名: $domain（适用于 HY2/TUIC）"
+    # =============================================
 
     local uuid=$(cat /proc/sys/kernel/random/uuid)
     local pass=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 12)
@@ -87,8 +72,8 @@ setup_config() {
     local priv=$(echo "$keypair" | awk '/PrivateKey:/ {print $2}')
     local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
     local short_id=$(openssl rand -hex 4)
+    local ip=$(curl -s4 ip.sb)
 
-    # 为 Hy2/TUIC 生成证书（CN = 用户输入的 domain，可能是 IP 或域名）
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$domain" >/dev/null 2>&1
 
@@ -176,16 +161,15 @@ EOF
     echo -e "\n\033[33m🚀 Reality 節點:\033[0m"
     echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.apple.com&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
     echo -e "\n\033[33m🚀 Hy2 節點:\033[0m"
-    echo "hysteria2://$pass@$ip:443?sni=$domain&insecure=1#Hy2"
+    echo "hysteria2://$pass@$ip:443?sni=apple.com&insecure=1#Hy2"
     echo -e "\n\033[33m🚀 TUIC5 節點:\033[0m"
-    echo "tuic://$uuid:$pass@$ip:8443?sni=$domain&alpn=h3&insecure=1#TUIC5"
+    echo "tuic://$uuid:$pass@$ip:8443?sni=apple.com&alpn=h3&insecure=1#TUIC5"
     echo -e "\033[35m==============================================================\033[0m\n"
 }
 
-# --- 5. 交互菜单 ---
 show_menu() {
     clear
-    echo -e "\033[36m      sing-box 管理脚本 (Reality 修复版 - 支持无域名)\033[0m"
+    echo -e "\033[36m      sing-box 脚本 (还原原始通配版)\033[0m"
     echo "------------------------------------------"
     echo "  1. 安装 / 重新安装"
     echo "  2. 彻底卸载"
@@ -198,8 +182,7 @@ show_menu() {
             prepare_env
             install_singbox_and_ui
             setup_config
-            # 安装成功后删除自身
-            [[ -f "$0" ]] && rm -f "$0" && log "🧹 安装脚本已自动清理。"
+            [[ -f "$0" ]] && rm -f "$0" && log "🧹 脚本已自动清理。"
             ;;
         2) uninstall ;;
         3) exit 0 ;;
