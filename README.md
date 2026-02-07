@@ -8,12 +8,9 @@
 
 管理链接：输出直接点击的面板地址。
 
-## 一键安装命令
+## 一键安装和自动清理命令
 ```
-wget -O sing-box-2026-full.sh https://raw.githubusercontent.com/fuckGFW2015/singbox_4in1/refs/heads/main/sing-box-2026-full.sh && chmod +x sing-box-2026-full.sh && sudo ./sing-box-2026-full.sh
-```
-##一键卸载
-```
-sudo ./sing-box-2026-full.sh uninstall
+wget -O sing-box-2026-full.sh https://raw.githubusercontent.com/fuckGFW2015/singbox_4in1/refs/heads/main/sing-box-2026-full.sh && chmod +x sing-box-2026-full.sh && sudo ./sing-box-2026-full.sh && rm -f sing-box-2026-full.sh
 
 ```
+
