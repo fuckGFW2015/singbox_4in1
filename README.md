@@ -1,6 +1,6 @@
 ### 这个版本所有功能：
 
-5合1：Reality + Hy2 + TUIC5 + Argo。
+3合1：Reality + Hy2 + TUIC5。
 
 面板下载：自动部署Metacubexd。
 
