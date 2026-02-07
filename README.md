@@ -2,7 +2,7 @@
 
 5合1：Reality + Hy2 + TUIC5 + Argo。
 
-面板下载：自动部署 Yacd-Meta。
+面板下载：自动部署Metacubexd。
 
 二维码：所有节点自动生成二维码。
 
