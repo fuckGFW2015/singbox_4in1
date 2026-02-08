@@ -113,9 +113,12 @@ setup_config() {
     local uuid=$(cat /proc/sys/kernel/random/uuid)
     local pass=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 12)
     local secret=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
-    local keypair=$("$bin_path" generate reality-keypair)
-    local priv=$(echo "$keypair" | awk '/PrivateKey:/ {print $2}')
-    local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
+   # 安全生成 Reality 密钥对，确保命令成功且输出非空
+if ! keypair_output=$("$bin_path" generate reality-keypair 2>/dev/null) || [[ -z "$keypair_output" ]]; then
+    error "❌ 无法生成 Reality 密钥对！请确保 sing-box 版本 ≥ v1.8.0"
+fi
+local priv=$(echo "$keypair_output" | awk '/PrivateKey:/ {print $2}')
+local pub=$(echo "$keypair_output" | awk '/PublicKey:/ {print $2}')
     local short_id=$(openssl rand -hex 4)
 
     local ip=$(curl -s4m5 ip.sb || curl -s4m5 api.ipify.org)
