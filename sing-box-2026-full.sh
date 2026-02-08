@@ -44,21 +44,22 @@ prepare_env() {
         sysctl -p >/dev/null 2>&1 || true
     fi
 
-    # 🔥 关键：只操作 filter 表，保留 nat（EIP 依赖）
-    iptables -F
-    iptables -X
-    iptables -Z
+    # 清空规则，保持默认 ACCEPT（安全组已在云平台过滤）
     iptables -P INPUT ACCEPT
     iptables -P FORWARD ACCEPT
     iptables -P OUTPUT ACCEPT
+    iptables -F
+    iptables -X
+    iptables -Z
 
-    # 基础安全规则
+    # 基础安全规则（只放行，不 DROP）
     iptables -A INPUT -i lo -j ACCEPT
     iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
     iptables -A INPUT -p tcp --dport 22 -j ACCEPT   # SSH
     iptables -A INPUT -p tcp --dport 443 -j ACCEPT  # Reality (TCP)
     iptables -A INPUT -p tcp --dport 9090 -j ACCEPT # Panel
-    iptables -A INPUT -j DROP
+
+    # ❌ 移除这行：iptables -A INPUT -j DROP
 
     iptables-save > /etc/iptables/rules.v4
     systemctl enable --now netfilter-persistent
@@ -101,17 +102,9 @@ setup_config() {
     reality_sni="www.cloudflare.com"
     hy2_tuic_sni="one.one.one.one"
 
-    # 🔥 使用高穿透性 UDP 端口（借鉴旧脚本成功经验）
-    log "正在分配穿透性最佳的 UDP 端口..."
-    hy2_ports=(8443 2053 2087)
-    tuic_ports=(2096 8443 2053)
-    HY2_PORT=${hy2_ports[$((RANDOM % ${#hy2_ports[@]}))]}
-    TUIC_PORT=${tuic_ports[$((RANDOM % ${#tuic_ports[@]}))]}
-
-    # 避免端口冲突
-    if [ "$HY2_PORT" = "$TUIC_PORT" ]; then
-        TUIC_PORT=${tuic_ports[$(( (RANDOM + 1) % ${#tuic_ports[@]} ))]}
-    fi
+    # 🔥 固定使用高穿透性 UDP 端口（不再随机！）
+    HY2_PORT=8443   # Google QUIC 端口，阿里云友好
+    TUIC_PORT=2053  # Cloudflare DoH 端口，穿透性强
 
     log "HY2 端口: $HY2_PORT (UDP), TUIC 端口: $TUIC_PORT (UDP)"
 
@@ -203,7 +196,7 @@ setup_config() {
 }
 EOF
 
-    # 添加 UDP 端口到防火墙
+    # 添加 UDP 端口到防火墙（现在无 DROP，顺序无关）
     iptables -A INPUT -p udp --dport $HY2_PORT -j ACCEPT
     iptables -A INPUT -p udp --dport $TUIC_PORT -j ACCEPT
     iptables-save > /etc/iptables/rules.v4
