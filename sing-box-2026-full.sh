@@ -208,6 +208,7 @@ EOF
 Description=sing-box service
 After=network.target
 [Service]
+WorkingDirectory=$work_dir
 ExecStart=$bin_path run -c $work_dir/config.json
 Restart=on-failure
 User=root
